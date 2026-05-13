@@ -115,6 +115,79 @@ router.post('/enquire', (req, res) => {
   });
 });
 
+// ── POST /api/contact/resume (Upload to Cloudinary + Email) ──
+router.post('/resume', async (req, res) => {
+  const required = ['applicantName', 'applicantEmail', 'jobId', 'jobTitle', 'fileName', 'fileBase64'];
+  const missing  = requireFields(req.body, required);
+  if (missing.length) {
+    return res.status(400).json({ success: false, message: `Missing required fields: ${missing.join(', ')}` });
+  }
+
+  // Validate base64 size (max ~8 MB decoded)
+  const base64Len = (req.body.fileBase64 || '').length;
+  if (base64Len > 11_000_000) {
+    return res.status(400).json({ success: false, message: 'File too large. Maximum size is 5 MB.' });
+  }
+
+  try {
+    // 1. Upload to Cloudinary
+    const cloudinary = require('cloudinary').v2;
+    cloudinary.config({
+      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+      api_key: process.env.CLOUDINARY_API_KEY,
+      api_secret: process.env.CLOUDINARY_API_SECRET
+    });
+
+    const uploadResult = await cloudinary.uploader.upload(req.body.fileBase64, {
+      resource_type: 'raw', // since it can be pdf or doc
+      public_id: `resumes/${Date.now()}_${req.body.fileName.replace(/\.[^/.]+$/, "")}`,
+      format: req.body.fileName.split('.').pop().toLowerCase()
+    });
+
+    const fileUrl = uploadResult.secure_url;
+
+    // 2. Send Email via Nodemailer
+    if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+      const nodemailer = require('nodemailer');
+      const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: parseInt(process.env.SMTP_PORT || '587'),
+        secure: process.env.SMTP_SECURE === 'true',
+        auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+      });
+      const toEmail = process.env.NOTIFICATION_EMAIL || process.env.SMTP_USER;
+      
+      await transporter.sendMail({
+        from: `"GoodJob Applications" <${process.env.SMTP_USER}>`,
+        to: toEmail,
+        subject: `New Application: ${req.body.jobTitle} from ${req.body.applicantName}`,
+        html: `
+          <h2>New Job Application</h2>
+          <p><strong>Job Title:</strong> ${req.body.jobTitle} (#${req.body.jobId})</p>
+          <p><strong>Applicant Name:</strong> ${req.body.applicantName}</p>
+          <p><strong>Email:</strong> ${req.body.applicantEmail}</p>
+          <p><strong>Phone:</strong> ${req.body.applicantPhone || 'N/A'}</p>
+          <p><strong>Cover Note:</strong><br/>${req.body.coverNote ? req.body.coverNote.replace(/\n/g, '<br/>') : 'None'}</p>
+          <br/>
+          <p style="padding:15px; background:#f4f4f5; border-left:4px solid #0d9488;">
+            <strong>📄 View Resume:</strong><br/>
+            <a href="${fileUrl}" target="_blank" style="color:#0d9488; font-weight:bold; font-size:16px;">Click here to download/view the resume</a>
+          </p>
+        `
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      message: `Application submitted successfully! We will review your resume for "${req.body.jobTitle}".`,
+    });
+
+  } catch (error) {
+    console.error('[RESUME UPLOAD ERROR]', error);
+    res.status(500).json({ success: false, message: 'Failed to process application. Please try again later.' });
+  }
+});
+
 // ── POST /api/newsletter ──────────────────────────────────────
 router.post('/newsletter', (req, res) => {
   const { email } = req.body;
