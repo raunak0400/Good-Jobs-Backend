@@ -115,97 +115,80 @@ router.post('/enquire', (req, res) => {
   });
 });
 
-// ── POST /api/contact/resume (Upload to Cloudinary + Email) ──
+// ── POST /api/contact/resume ─────────────────────────────────
+// The frontend uploads the CV directly to Cloudinary and sends us the URL.
+// We just send a notification email via Resend (HTTPS — never blocked by Render).
 router.post('/resume', async (req, res) => {
-  const required = ['applicantName', 'applicantEmail', 'jobId', 'jobTitle', 'fileName', 'fileBase64'];
+  const required = ['applicantName', 'applicantEmail', 'jobId', 'jobTitle', 'fileName', 'resumeUrl'];
   const missing  = requireFields(req.body, required);
   if (missing.length) {
-    return res.status(400).json({ success: false, message: `Missing required fields: ${missing.join(', ')}` });
+    return res.status(400).json({ success: false, message: `Missing fields: ${missing.join(', ')}` });
   }
 
-  const base64Len = (req.body.fileBase64 || '').length;
-  if (base64Len > 11_000_000) {
-    return res.status(400).json({ success: false, message: 'File too large. Maximum size is 5 MB.' });
-  }
+  const { applicantName, applicantEmail, applicantPhone, coverNote,
+          jobId, jobTitle, fileName, fileSize, resumeUrl } = req.body;
 
-  let fileUrl = null;
+  console.log(`[RESUME] Application — Job: "${jobTitle}" | Applicant: ${applicantName}`);
+  console.log(`[RESUME] Resume URL: ${resumeUrl}`);
 
-  // ── Step 1: Upload to Cloudinary ────────────────────────────
+  // ── Send email via Resend (HTTPS — works on Render free tier) ──
   try {
-    console.log('[RESUME] Starting Cloudinary upload for:', req.body.fileName);
-    console.log('[RESUME] cloud_name:', process.env.CLOUDINARY_CLOUD_NAME, '| api_key set:', !!process.env.CLOUDINARY_API_KEY);
+    const RESEND_KEY = process.env.RESEND_API_KEY;
+    const toEmail    = process.env.NOTIFICATION_EMAIL || 'good.jobs.resume@gmail.com';
 
-    const cloudinary = require('cloudinary').v2;
-    cloudinary.config({
-      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-      api_key:    process.env.CLOUDINARY_API_KEY,
-      api_secret: process.env.CLOUDINARY_API_SECRET,
-    });
-
-    const uploadResult = await cloudinary.uploader.upload(req.body.fileBase64, {
-      resource_type: 'raw',
-      folder:        'goodjob-resumes',
-      public_id:     `${Date.now()}_${req.body.applicantName.replace(/\s+/g,'_')}_${req.body.fileName.replace(/\.[^/.]+$/, '')}`,
-      format:        req.body.fileName.split('.').pop().toLowerCase(),
-    });
-
-    fileUrl = uploadResult.secure_url;
-    console.log('[RESUME] Cloudinary OK. URL:', fileUrl);
-
-  } catch (cloudErr) {
-    console.error('[RESUME] Cloudinary FAILED:', cloudErr.message || cloudErr);
-    return res.status(500).json({ success: false, message: 'Failed to upload resume. Please try again.' });
-  }
-
-  // ── Step 2: Send Email ────────────────────────────────────
-  try {
-    const smtpReady = process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS;
-    console.log('[RESUME] SMTP ready:', !!smtpReady, '| host:', process.env.SMTP_HOST, '| user:', process.env.SMTP_USER);
-
-    if (smtpReady) {
-      const nodemailer  = require('nodemailer');
-      const transporter = nodemailer.createTransport({
-        host:   process.env.SMTP_HOST,
-        port:   parseInt(process.env.SMTP_PORT || '587'),
-        secure: process.env.SMTP_SECURE === 'true',
-        auth:   { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-      });
-
-      const toEmail = process.env.NOTIFICATION_EMAIL || process.env.SMTP_USER;
-      await transporter.sendMail({
-        from:    `"GoodJob Applications" <${process.env.SMTP_USER}>`,
-        to:      toEmail,
-        subject: `New Application: ${req.body.jobTitle} — ${req.body.applicantName}`,
-        html: `
-          <div style="font-family:Inter,sans-serif;max-width:600px;margin:0 auto;background:#f9fafb;padding:32px;border-radius:12px;">
-            <h2 style="color:#0d9488;">New Job Application</h2>
-            <hr style="border:1px solid #e5e7eb;margin:16px 0"/>
-            <p><strong>Job:</strong> ${req.body.jobTitle} (ID #${req.body.jobId})</p>
-            <p><strong>Applicant:</strong> ${req.body.applicantName}</p>
-            <p><strong>Email:</strong> <a href="mailto:${req.body.applicantEmail}">${req.body.applicantEmail}</a></p>
-            <p><strong>Phone:</strong> ${req.body.applicantPhone || 'N/A'}</p>
-            <p><strong>Cover Note:</strong><br/>${req.body.coverNote ? req.body.coverNote.replace(/\n/g, '<br/>') : '<em>None</em>'}</p>
-            <br/>
-            <div style="padding:20px;background:#f0fdf4;border-left:4px solid #0d9488;border-radius:8px;">
-              <strong style="color:#0d9488;">Resume Link:</strong><br/>
-              <a href="${fileUrl}" target="_blank" style="color:#0d9488;font-weight:bold;">${fileUrl}</a>
-            </div>
-            <p style="margin-top:24px;font-size:12px;color:#9ca3af;">GoodJob Platform · ${new Date().toUTCString()}</p>
-          </div>
-        `,
-      });
-      console.log('[RESUME] Email sent to:', toEmail);
+    if (!RESEND_KEY) {
+      console.warn('[RESUME] RESEND_API_KEY not set — email skipped. URL:', resumeUrl);
     } else {
-      console.warn('[RESUME] SMTP not configured — skipping email.');
+      const emailRes = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${RESEND_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from:    'GoodJob Applications <onboarding@resend.dev>',
+          to:      [toEmail],
+          subject: `New Application: ${jobTitle} — ${applicantName}`,
+          html: `
+            <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#f9fafb;padding:32px;border-radius:12px;">
+              <h2 style="color:#0d9488;margin-top:0;">📄 New Job Application</h2>
+              <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0"/>
+              <p><strong>Job:</strong> ${jobTitle} (ID #${jobId})</p>
+              <p><strong>Applicant:</strong> ${applicantName}</p>
+              <p><strong>Email:</strong> <a href="mailto:${applicantEmail}" style="color:#0d9488;">${applicantEmail}</a></p>
+              <p><strong>Phone:</strong> ${applicantPhone || 'N/A'}</p>
+              <p><strong>File:</strong> ${fileName}${fileSize ? ` (${fileSize})` : ''}</p>
+              <p><strong>Cover Note:</strong><br/>${coverNote ? coverNote.replace(/\n/g, '<br/>') : '<em>None provided</em>'}</p>
+              <br/>
+              <div style="padding:20px;background:#f0fdf4;border-left:4px solid #0d9488;border-radius:8px;">
+                <strong style="color:#0d9488;font-size:15px;">📎 View / Download Resume</strong><br/><br/>
+                <a href="${resumeUrl}" target="_blank"
+                   style="display:inline-block;padding:12px 24px;background:#0d9488;color:#fff;border-radius:8px;font-weight:bold;text-decoration:none;">
+                  Open Resume
+                </a>
+                <br/><br/>
+                <span style="font-size:12px;color:#6b7280;word-break:break-all;">${resumeUrl}</span>
+              </div>
+              <p style="margin-top:24px;font-size:12px;color:#9ca3af;">GoodJob Platform · ${new Date().toUTCString()}</p>
+            </div>
+          `,
+        }),
+      });
+
+      const emailData = await emailRes.json();
+      if (!emailRes.ok) {
+        console.error('[RESUME] Resend error:', JSON.stringify(emailData));
+      } else {
+        console.log('[RESUME] Email sent via Resend. ID:', emailData.id, '| to:', toEmail);
+      }
     }
   } catch (mailErr) {
-    // CV already uploaded — don't fail the user because of email
-    console.error('[RESUME] Email FAILED (CV uploaded OK):', mailErr.message || mailErr);
+    console.error('[RESUME] Email failed:', mailErr.message);
   }
 
   res.status(201).json({
     success: true,
-    message: `Application submitted! We have received your resume for "${req.body.jobTitle}".`,
+    message: `Application submitted! We have received your resume for "${jobTitle}". We will be in touch soon.`,
   });
 });
 
