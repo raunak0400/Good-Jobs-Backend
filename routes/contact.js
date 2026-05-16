@@ -128,11 +128,12 @@ router.post('/resume', async (req, res) => {
   const { applicantName, applicantEmail, applicantPhone, coverNote,
           jobId, jobTitle, fileName, fileSize, resumeUrl } = req.body;
 
-  // Add fl_attachment flag so clicking the link downloads the file directly
-  const downloadUrl = resumeUrl.replace('/upload/', '/upload/fl_attachment/');
+  // Build a backend download proxy URL — forces download on any browser/email client
+  const backendBase  = process.env.BACKEND_URL || 'https://good-jobs-backend.onrender.com';
+  const downloadUrl  = `${backendBase}/api/contact/download?url=${encodeURIComponent(resumeUrl)}&name=${encodeURIComponent(fileName)}`;
 
   console.log(`[RESUME] Application — Job: "${jobTitle}" | Applicant: ${applicantName}`);
-  console.log(`[RESUME] Download URL: ${downloadUrl}`);
+  console.log(`[RESUME] Download proxy URL: ${downloadUrl}`);
 
   // ── Send email via Resend (HTTPS — works on Render free tier) ──
   try {
@@ -165,12 +166,12 @@ router.post('/resume', async (req, res) => {
               <br/>
               <div style="padding:20px;background:#f0fdf4;border-left:4px solid #0d9488;border-radius:8px;">
                 <strong style="color:#0d9488;font-size:15px;">📎 Download Resume</strong><br/><br/>
-                <a href="${downloadUrl}" target="_blank"
+                <a href="${downloadUrl}"
                    style="display:inline-block;padding:12px 24px;background:#0d9488;color:#fff;border-radius:8px;font-weight:bold;text-decoration:none;">
                   ⬇ Download Resume
                 </a>
                 <br/><br/>
-                <span style="font-size:12px;color:#6b7280;word-break:break-all;">${downloadUrl}</span>
+                <span style="font-size:12px;color:#6b7280;word-break:break-all;">Direct URL: ${resumeUrl}</span>
               </div>
               <p style="margin-top:24px;font-size:12px;color:#9ca3af;">GoodJob Platform · ${new Date().toUTCString()}</p>
             </div>
@@ -209,6 +210,30 @@ router.post('/newsletter', (req, res) => {
     success: true,
     message: 'Subscribed successfully! You\'ll receive the latest job alerts and accommodation updates.',
   });
+});
+
+// ── GET /api/contact/download — proxy to force file download ─
+router.get('/download', async (req, res) => {
+  const { url, name } = req.query;
+  if (!url) return res.status(400).send('Missing url parameter');
+
+  try {
+    const fileRes = await fetch(decodeURIComponent(url));
+    if (!fileRes.ok) return res.status(502).send('Could not fetch file from storage');
+
+    const safeFileName = name ? decodeURIComponent(name) : 'resume.pdf';
+    const contentType  = fileRes.headers.get('content-type') || 'application/octet-stream';
+
+    res.setHeader('Content-Disposition', `attachment; filename="${safeFileName}"`);
+    res.setHeader('Content-Type', contentType);
+
+    // Stream the file directly to the client
+    const { Readable } = require('stream');
+    Readable.fromWeb(fileRes.body).pipe(res);
+  } catch (err) {
+    console.error('[DOWNLOAD] Proxy error:', err.message);
+    res.status(500).send('Download failed');
+  }
 });
 
 module.exports = router;
