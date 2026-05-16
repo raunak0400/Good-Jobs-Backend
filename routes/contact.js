@@ -128,8 +128,11 @@ router.post('/resume', async (req, res) => {
   const { applicantName, applicantEmail, applicantPhone, coverNote,
           jobId, jobTitle, fileName, fileSize, resumeUrl } = req.body;
 
+  // Add fl_attachment flag so clicking the link downloads the file directly
+  const downloadUrl = resumeUrl.replace('/upload/', '/upload/fl_attachment/');
+
   console.log(`[RESUME] Application — Job: "${jobTitle}" | Applicant: ${applicantName}`);
-  console.log(`[RESUME] Resume URL: ${resumeUrl}`);
+  console.log(`[RESUME] Download URL: ${downloadUrl}`);
 
   // ── Send email via Resend (HTTPS — works on Render free tier) ──
   try {
@@ -161,13 +164,13 @@ router.post('/resume', async (req, res) => {
               <p><strong>Cover Note:</strong><br/>${coverNote ? coverNote.replace(/\n/g, '<br/>') : '<em>None provided</em>'}</p>
               <br/>
               <div style="padding:20px;background:#f0fdf4;border-left:4px solid #0d9488;border-radius:8px;">
-                <strong style="color:#0d9488;font-size:15px;">📎 View / Download Resume</strong><br/><br/>
-                <a href="${resumeUrl}" target="_blank"
+                <strong style="color:#0d9488;font-size:15px;">📎 Download Resume</strong><br/><br/>
+                <a href="${downloadUrl}" target="_blank"
                    style="display:inline-block;padding:12px 24px;background:#0d9488;color:#fff;border-radius:8px;font-weight:bold;text-decoration:none;">
-                  Open Resume
+                  ⬇ Download Resume
                 </a>
                 <br/><br/>
-                <span style="font-size:12px;color:#6b7280;word-break:break-all;">${resumeUrl}</span>
+                <span style="font-size:12px;color:#6b7280;word-break:break-all;">${downloadUrl}</span>
               </div>
               <p style="margin-top:24px;font-size:12px;color:#9ca3af;">GoodJob Platform · ${new Date().toUTCString()}</p>
             </div>
