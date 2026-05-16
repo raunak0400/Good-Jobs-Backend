@@ -128,12 +128,38 @@ router.post('/resume', async (req, res) => {
   const { applicantName, applicantEmail, applicantPhone, coverNote,
           jobId, jobTitle, fileName, fileSize, resumeUrl } = req.body;
 
-  // Build a backend download proxy URL — forces download on any browser/email client
-  const backendBase  = process.env.BACKEND_URL || 'https://good-jobs-backend.onrender.com';
-  const downloadUrl  = `${backendBase}/api/contact/download?url=${encodeURIComponent(resumeUrl)}&name=${encodeURIComponent(fileName)}`;
+  // ── Generate a signed Cloudinary download URL ─────────────────
+  // This bypasses the 401 access restriction and forces a download.
+  // Valid for 7 days.
+  let downloadUrl = resumeUrl; // fallback to raw URL
+  try {
+    const cloudinary = require('cloudinary').v2;
+    cloudinary.config({
+      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+      api_key:    process.env.CLOUDINARY_API_KEY,
+      api_secret: process.env.CLOUDINARY_API_SECRET,
+    });
+
+    // Extract public_id from URL (everything after /upload/, strip version prefix)
+    const uploadIdx = resumeUrl.indexOf('/upload/');
+    if (uploadIdx !== -1) {
+      const ext      = fileName.split('.').pop().toLowerCase();
+      let publicId   = resumeUrl.substring(uploadIdx + 8).replace(/^v\d+\//, '');
+      publicId       = publicId.replace(new RegExp(`\\.${ext}$`), ''); // strip extension
+      const expiresAt = Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60); // 7 days
+
+      downloadUrl = cloudinary.utils.private_download_url(publicId, ext, {
+        resource_type: 'raw',
+        attachment:    true,
+        expires_at:    expiresAt,
+      });
+      console.log('[RESUME] Signed download URL generated:', downloadUrl.substring(0, 80) + '...');
+    }
+  } catch (signErr) {
+    console.error('[RESUME] Failed to sign URL, using raw URL:', signErr.message);
+  }
 
   console.log(`[RESUME] Application — Job: "${jobTitle}" | Applicant: ${applicantName}`);
-  console.log(`[RESUME] Download proxy URL: ${downloadUrl}`);
 
   // ── Send email via Resend (HTTPS — works on Render free tier) ──
   try {
