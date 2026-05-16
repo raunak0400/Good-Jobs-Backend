@@ -212,28 +212,51 @@ router.post('/newsletter', (req, res) => {
   });
 });
 
-// ── GET /api/contact/download — proxy to force file download ─
-router.get('/download', async (req, res) => {
+// ── GET /api/contact/download — proxy Cloudinary file as forced download ─
+router.get('/download', (req, res) => {
   const { url, name } = req.query;
   if (!url) return res.status(400).send('Missing url parameter');
 
+  let decodedUrl;
   try {
-    const fileRes = await fetch(decodeURIComponent(url));
-    if (!fileRes.ok) return res.status(502).send('Could not fetch file from storage');
+    decodedUrl = decodeURIComponent(url);
+    new URL(decodedUrl); // validate it's a real URL
+  } catch {
+    return res.status(400).send('Invalid url parameter');
+  }
 
-    const safeFileName = name ? decodeURIComponent(name) : 'resume.pdf';
-    const contentType  = fileRes.headers.get('content-type') || 'application/octet-stream';
+  const safeFileName = name ? decodeURIComponent(name) : 'resume.pdf';
+  console.log('[DOWNLOAD] Proxying:', decodedUrl);
+
+  const https = require('https');
+  const request = https.get(decodedUrl, (fileRes) => {
+    console.log('[DOWNLOAD] Cloudinary status:', fileRes.statusCode);
+
+    if (fileRes.statusCode === 301 || fileRes.statusCode === 302) {
+      // Follow redirect
+      const redirectUrl = fileRes.headers.location;
+      console.log('[DOWNLOAD] Redirecting to:', redirectUrl);
+      return res.redirect(redirectUrl);
+    }
+
+    if (fileRes.statusCode !== 200) {
+      console.error('[DOWNLOAD] Non-200 from Cloudinary:', fileRes.statusCode);
+      return res.status(502).send('Could not fetch file from storage. Status: ' + fileRes.statusCode);
+    }
 
     res.setHeader('Content-Disposition', `attachment; filename="${safeFileName}"`);
-    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Type', fileRes.headers['content-type'] || 'application/octet-stream');
+    if (fileRes.headers['content-length']) {
+      res.setHeader('Content-Length', fileRes.headers['content-length']);
+    }
 
-    // Stream the file directly to the client
-    const { Readable } = require('stream');
-    Readable.fromWeb(fileRes.body).pipe(res);
-  } catch (err) {
-    console.error('[DOWNLOAD] Proxy error:', err.message);
-    res.status(500).send('Download failed');
-  }
+    fileRes.pipe(res); // Stream directly to client
+  });
+
+  request.on('error', (err) => {
+    console.error('[DOWNLOAD] HTTPS request error:', err.message);
+    if (!res.headersSent) res.status(500).send('Download failed');
+  });
 });
 
 module.exports = router;
