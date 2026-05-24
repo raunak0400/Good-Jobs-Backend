@@ -11,11 +11,12 @@ Currently, only the latest `master` branch is supported with security updates.
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability within the Good Jobs backend infrastructure (e.g., data exposure, unauthenticated endpoint access, API vulnerabilities), please send an e-mail to our support team at **support@goodjobs.com**.
+If you discover a security vulnerability within the Good Jobs backend infrastructure (e.g., data exposure, unauthenticated endpoint access, API vulnerabilities), please send an e-mail to our support team at **[support@goodjobs.com](mailto:support@goodjobs.com)**.
 
 All security vulnerabilities will be promptly addressed. Please do **not** disclose the vulnerability publicly until it has been patched and resolved.
 
 When reporting a vulnerability, please include:
+
 - A description of the vulnerability.
 - Steps to reproduce the issue (e.g., specific cURL commands or endpoints).
 - Potential impact.
